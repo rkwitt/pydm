@@ -15,8 +15,6 @@ http://en.wikipedia.org/wiki/Dirichlet_distribution
 import numpy as np
 
 from scipy.special import (psi, polygamma, gammaln)
-from scipy.misc import logsumexp
-
 
 def sample(alpha,N=1):
     """ Draw a random sample form a Dirichlet distribution.
