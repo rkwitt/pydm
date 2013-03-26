@@ -1,0 +1,4 @@
+pydm
+====
+
+Dirichlet mixture estimation
