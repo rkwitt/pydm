@@ -2,9 +2,14 @@
 
 This module implements a Dirichlet mixture model, as it is used in: 
 
-N. Rasiwasia and N. Vasconcelos, "Holistic Context Models for Visual 
-Recognition". In: IEEE Transactions on Pattern Analysis and Machine 
-Intelligence, May 2012, 34(5): 902-917
+[1] N. Rasiwasia and N. Vasconcelos, "Holistic Context Models for Visual 
+    Recognition". In: IEEE Transactions on Pattern Analysis and Machine 
+    Intelligence, May 2012, 34(5): pp. 902-917 
+
+We also draw on concepts outlined in:
+
+[2] T. Minka. "Estimating a Dirichlet Distribution", Technical Report,
+    Microsoft, Online: http://goo.gl/wcrvb
 """
 
 
@@ -13,13 +18,15 @@ Intelligence, May 2012, 34(5): 902-917
 
 
 import numpy as np
-import dirichlet
 from scipy.special import (psi, digamma, polygamma, gammaln)
 from sklearn.cluster import KMeans
 from collections import defaultdict
 
+# pydm Dirichlet stuff
+import dirichlet
 
-def sample(weights,alphas,N=1):
+
+def sample(weights, alphas, N=1):
     """ Draw N random samples from model.
         
     Parameters
@@ -63,13 +70,12 @@ def sample(weights,alphas,N=1):
     return (np.matrix(X),s)
 
 
-def init(X,n_components=1):
+def init(X, n_components=1):
     """Initialize mixture parameters from a data sample.
 
-    The strategy is to run simple k-means clustering on the
-    simplex, get the cluster assignments and then run an in-
-    dependent Dirichlet (moment-matching) parameter estimate 
-    on the samples belonging to each cluster.
+    The strategy is to run simple k-means clustering on the simplex, get the
+    cluster assignments and then run an in- dependent Dirichlet (moment 
+    matching) parameter estimate on the samples belonging to each cluster.
 
     Parameters
     ----------
@@ -106,10 +112,10 @@ def init(X,n_components=1):
     for i in range(0,n_components):
         pos = np.array(np.where(km_lab == i))
         alphas[i,:] = dirichlet.moment_match(X[pos.ravel(),:])
-    return (weights,alphas)
+    return (weights, alphas)
 
 
-def estimate(X,n_components=1,n_iter=1,weights_0=None,alphas_0=None):
+def estimate(X, n_components=1, n_iter=50, step_size = 0.3):
     """Run GEM algorithm to estimate mixture parameters.
 
     Parameters
@@ -118,21 +124,15 @@ def estimate(X,n_components=1,n_iter=1,weights_0=None,alphas_0=None):
     X : numpy matrix, shape (N, D)
         N D-dimensional data samples (rows must sum to 1).
     
-    n_components : int
+    n_components : int (default : 1)
         Number of desired mixture components.
     
-    n_iter : int
+    n_iter : int (default: 50)
         Maximum number of iterations to run.
-    
-    weights_0 : numpy array, shape (1, C), optional
-        Vector of initial mixture weights (must sum to 1).
 
-    alphas_0 : numpy matrix, shape (n_components, D), optional
-        Matrix of initial Dirichlet mixture distribution parameters. If
-        provided, the i-th row needs to contain the initial D-dimensional 
-        Dirichlet distribution parameter vecotor of the i-th mixture 
-        component.
-        
+    step_size : float
+        Step size of the Newton-update step.
+    
     Returns
     -------
     
@@ -145,18 +145,16 @@ def estimate(X,n_components=1,n_iter=1,weights_0=None,alphas_0=None):
         vector of the i-th Dirichlet mixture component.
     """
     
-    if weights_0 is None or alphas_0 is None:
-        (weights_0, alphas_0) = init(X,n_components)
+    # Initialize weights and alphas
+    (w_0, a_0) = init(X, n_components)
 
-    n,d0 = X.shape
-    c,d1 = alphas_0.shape
-    assert c == n_components and d0 == d1, "Oops ..."
-    d = d0
+    n, d = X.shape
+    c, _ = a_0.shape
+    assert a_0.shape[0] == n_components and a_0.shape[1] == d, "Oops ..."
+    assert step_size <= 1
 
-    a_hat = alphas_0
-    w_hat = weights_0
-
-    for i in range(0,n_iter):
+    a_hat, w_hat = a_0, w_0
+    for i in range(0, n_iter):
         #-------
         # E-Step
         #-------
@@ -164,40 +162,47 @@ def estimate(X,n_components=1,n_iter=1,weights_0=None,alphas_0=None):
         for k in range(0,c):
             ll_k[:,k] = (dirichlet.logp(X,a_hat[k,:]) + 
                          np.log(w_hat[k])).ravel()
-  
         t0 = np.matrix(np.max(ll_k,axis=1)).transpose()
-        t1 = np.exp(ll_k - np.tile(t0,(1,c)))
-        t2 = np.sum(t1,axis=1)
+        t1 = np.exp(ll_k - np.tile(t0, (1, c)))
+        t2 = np.sum(t1, axis=1)
         t3 = np.log(t2) + t0
     
-        print "[Iteration %.3d]: Log-likelihood=%.5f" % (i,np.sum(t3))
-
-        Y = np.exp(ll_k - np.tile(t3,(1,c)))
+        print "[Iteration %.3d]: Log-likelihood=%.5f" % (i, np.sum(t3))
+        Y = np.exp(ll_k - np.tile(t3, (1, c)))
 
         #-------
         # M-Step
         #-------
-        N = np.sum(Y)
-        N_k = np.asarray(np.sum(Y,axis=0)).ravel()
-
-        w_new = N_k / N   
+        N = np.asarray(np.sum(Y, axis=0)).ravel()
+        w_new = N / np.sum(Y)   
         a_new = np.zeros([c,d])
-        H = np.ones([d,d,c])
-        g = np.zeros([c,d])
-    
-        for k in range(0,c):
-            t0 = np.sum(a_hat[k,:])
-            H[:,:,k] = np.ones([d,d]) * trigamma(t0) * N_k[k]
-
-            for l in range(0,d):
-                H[l,l,k] = N_k[k] * (trigamma(t0) - trigamma(a_hat[k,l]))
-                x_l = np.array(np.log(X[:,l])).ravel()
-                y_l = np.asarray(Y[:,k]).ravel()
-                t1 = np.sum(x_l * y_l)
-                g[k,l] = N_k[k] * (digamma(t0) - digamma(a_hat[k,l])) + t1
-            
-            a_new[k,:] = a_hat[k,:] - np.linalg.solve(H[:,:,k],g[k,:])
         
+        g = np.zeros([c,d])
+        for k in range(0,c):
+            # Eq. (4) of [1, supp. mat]
+            for l in range(0,d):
+                x_l = np.asarray(np.log(X[:,l])).ravel()
+                y_l = np.asarray(Y[:,k]).ravel()
+                g[k,l] = N[k] * (digamma(np.sum(a_hat[k,:])) - 
+                                 digamma(a_hat[k,l])) + np.sum(x_l*y_l)
+
+            # Eqs. (12)-(18) of [2]
+            Q = np.zeros((d,d))
+            for l in range(0,d):
+                Q[l,l] = -N[k] * trigamma(a_hat[k,l])
+           
+            z = N[k]*trigamma(np.sum(a_hat[k,:]))
+            t0 = np.sum(g[k,:]/np.diagonal(Q))
+            t1 = (1/z + np.sum(1/np.diagonal(Q)))
+            b = t0 / t1
+
+            change = np.zeros((d,))
+            for l in range(0,d):
+                change[l] = (g[k,l] - b)/Q[l,l]
+    
+            # Eq. (3) of [1, supp. mat], actually wrong sign in [1]
+            a_new[k,:] = a_hat[k,:] - step_size * change
+
         a_hat = a_new
         w_hat = w_new
     return (w_hat, a_hat)
