@@ -1,4 +1,4 @@
 pydm
 ====
 
-Dirichlet mixture estimation
+Dirichlet mixture estimation. Documentation coming soon ...
