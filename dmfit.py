@@ -65,8 +65,13 @@ def main(argv=None):
                                         options.components,
                                         options.iterations,
                                         options.stepSize)
-        print "w_hat :", w_hat
-        print "a_hat :", a_hat
+        print "w_hat"
+        print "-----"
+        print w_hat
+        print "a_hat"
+        print "-----"
+        print a_hat
+
     except Exception as e:
         print "OOps: %s" % e
 
